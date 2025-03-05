@@ -1,162 +1,18 @@
-name: Staging zinto Deployment Workflow
-
-on:
-  workflow_dispatch:
-    inputs:
-      instance_name:
-        description: 'Select the instance for deployment: (ENV-Mode-ModeName)'
-        required: true
-        type: choice
-        options:
-          - staging-zinto_api-api #--> ENV:- Staging, Instance_Name:- Staging ZINTO, Mode:- API
-          - staging-zinto_pubsub-pubsub #--> ENV:- Staging, Instance_Name:- Staging zinto, Mode:- Pubsub
-          - staging-zinto-agenda-agenda #--> ENV:- Staging, Instance_Name:- Staging zinto, Mode:- Agenda
-      deploy_mode:
-        description: 'Select deployment mode'
-        required: true
-        type: choice
-        options:
-          - tag
-      tag_name:
-        description: 'Enter the tag name based on your selection'
-        required: true
-
+name: GitHub Actions Demo
+run-name: ${{ github.actor }} is testing out GitHub Actions 🚀
+on: [push]
 jobs:
-  set_runner:
-    runs-on: Staging-Zinto-0  
-    outputs:
-      runner: ${{ steps.set-runner.outputs.runner }}
-      mode: ${{ steps.set-runner.outputs.mode }}
+  Explore-GitHub-Actions:
+    runs-on: ubuntu-latest
     steps:
-      - name: Send Slack Notification
+      - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
+      - run: echo "🐧 This job is now running on a ${{ runner.os }} server hosted by GitHub!"
+      - run: echo "🔎 The name of your branch is ${{ github.ref }} and your repository is ${{ github.repository }}."
+      - name: Check out repository code
+        uses: actions/checkout@v4
+      - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
+      - run: echo "🖥️ The workflow is now ready to test your code on the runner."
+      - name: List files in the repository
         run: |
-          # curl -X POST -H 'Content-type: application/json' \
-          # --data '{
-          #   "channel": "#test-slack-zinto",
-          #   "text": "*zinto deployment has been triggered on instance: *'"${{ github.event.inputs.instance_name }}"'.\n\n*Triggered by*: *'"${{ github.actor }}"'*\n*Deploy Mode*: *'"${{ github.event.inputs.deploy_mode }}"'*\n*Branch/Tag*: *'"${{ github.event.inputs.branch_or_tag_name }}"'*"
-          # }' ${{ secrets.SLACK_WEBHOOK_URL }}
-
-      - name: Validate Instance and Set Mode and Runner
-        id: set-runner
-        run: |
-          case "${{ github.event.inputs.instance_name }}" in
-            staging-zinto_api-api)
-              export RUNNER="Staging-Zinto-0"
-              export MODE="api"
-              ;;
-            staging-zinto_pubsub-pubsub)
-              export RUNNER="Staging-Zinto-0"
-              export MODE="pubsub"
-              ;;
-            staging-zinto-agenda-agenda)
-              export RUNNER="Staging-Zinto-0"
-              export MODE="agenda"
-              ;;
-            *)
-              echo "Invalid instance name selected."
-              exit 1
-              ;;
-          esac
-
-          # Set the runner and mode as outputs
-          echo "::set-output name=runner::${RUNNER}"
-          echo "::set-output name=mode::${MODE}"
-
-          # Echo for debugging purposes
-          echo "Instance validated: ${{ github.event.inputs.instance_name }}"
-          echo "Runner: ${RUNNER}"
-          echo "Mode: ${MODE}"
-
-      - name: Checkout repository
-        uses: actions/checkout@v2
-
-      - name: Trim and Set Tag Name
-        id: trim-tag
-        run: |
-          TagName="$(echo -n "${{ github.event.inputs.tag_name }}" | xargs)"
-          echo "TagName=${TagName}" >> $GITHUB_ENV
-          echo "::set-output name=TagName::${TagName}"
-
-      - name: Validate Tag
-        id: validate-tag
-        run: |
-          TagName="${{ steps.trim-tag.outputs.TagName }}"
-          deployMode="${{ github.event.inputs.deploy_mode }}"
-        
-          if [[ "$deployMode" == "tag" ]]; then
-            echo "Validating tag: $TagName"
-            if git ls-remote --tags origin "$TagName" | grep -q "$TagName"; then
-              echo "Tag '$TagName' exists."
-            else
-              echo "Tag '$TagName' does not exist."
-              exit 1
-            fi
-          else
-            echo "Invalid deploy mode selected. Only 'tag' is valid."
-            exit 1
-          fi
-
-  app_deployment:
-    needs: set_runner  
-    runs-on: ${{ needs.set_runner.outputs.runner }}  
-    env:
-      WORKING_DIR: /home/ubuntu/zinto
-      TAG_NAME: ${{ github.event.inputs.tag_name }}
-      MODE: ${{ needs.set_runner.outputs.mode }}  
-    steps:
-      - name: Pull latest code and install dependencies
-        run: |
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "Uncommitted changes detected. Stashing changes..."
-            git stash
-          else
-            echo "No uncommitted changes."
-          fi
-          git fetch origin
-          # Checkout the provided tag
-          echo "Checking out $TAG_NAME as a ${{ github.event.inputs.deploy_mode }}"
-          git checkout "$TAG_NAME"
-  
-          if [[ "${{ github.event.inputs.deploy_mode }}" == "tag" ]]; then
-            git pull origin "$TAG_NAME"
-          fi
-          npm install
-        working-directory: ${{ env.WORKING_DIR }}
-
-      - name: Deploy the selected mode
-        run: |
-          declare -A modes_map=(
-            [api]="api"
-            [agenda-consumer]="agenda"
-            [pubsub-consumer]="pubsub"
-          )
-
-          run_script() {
-            local script_name="$1"
-            local script=${modes_map[$script_name]}
-            local service_name="zinto-$script"
-            output=$( pm2 ls | grep "$service_name" | grep -qw "online" && echo "1" || echo "0")
-            if [ $output -eq 1 ]; then
-              echo "Service '$service_name' is running. Reloading..."
-              pm2 reload "$service_name"
-            else
-              if [ "$script_name" == "api" ]; then
-                echo "Service not running, starting with 'npm start'"
-                npm start
-              else
-                echo "Service not running, starting with 'npm run $script_name'"
-                npm run "$script_name"
-              fi
-            fi
-          }
-
-          # Use the mode from the first job
-          if [[ " ${!modes_map[@]} " =~ " ${{ needs.set_runner.outputs.mode }} " ]]; then
-            echo "Option selected: ${{ needs.set_runner.outputs.mode }}"
-            echo "Running the deployment script for ${{ needs.set_runner.outputs.mode }}"
-            run_script "${{ needs.set_runner.outputs.mode }}"
-          else
-            echo "Invalid option selected."
-            exit 1
-          fi
-        working-directory: ${{ env.WORKING_DIR }}
+          ls ${{ github.workspace }}
+      - run: echo "🍏 This job's status is ${{ job.status }}."
