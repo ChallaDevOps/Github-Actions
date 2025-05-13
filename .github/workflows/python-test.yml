@@ -1,0 +1,17 @@
+name : Testing Github actions on Pyhton scripts deployment
+
+on: [push]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps: 
+       - uses: actions/checkout@v3
+       - name: setup Pyhton
+         uses: actions/setup-python@v4
+         with:
+          python-version: '3.11'
+       - name: Install dependandies 
+         run: pip install -r requirements.txt
+       - name: Run tests
+         run: pytest
